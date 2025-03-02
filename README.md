@@ -6,7 +6,7 @@
 
 # About
 
-A Discord bot for managing nominations and voting for a member of the week.
+A Discord bot for managing nominations and voting for a member of the week. The bot will create a poll every Friday at 12:00 AM UTC, and announce the winner the following Sunday at 6:00 PM UTC. Each member is limited to one vote, and you can't vote for yourself! (No cheating.) Thank you to [r/fuckipswitch](https://www.reddit.com/r/Discord_Bots/s/7QXdKdt5Mx) and [r/Silent_Department529](https://www.reddit.com/r/Discord_Bots/s/1Kj26gHGmg) for the idea!
 
 # Dependencies
 
