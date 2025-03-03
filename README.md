@@ -16,6 +16,7 @@ A Discord bot for managing nominations and voting for a member of the week. The 
 - It is important that therr are no messages sent after the poll is created. The bot will be unable to collect the votes if the poll is not the most recent message. If a message is sent and deleted, the bot will still be able to collect the votes.
 - Several people can nominate one person, one person cannot nominate several people.
 - The bot will recognize tied votes and no winner will be picked. Instead, it will announce a tie.
+- The bot will subtract its reaction from the count when collecting votes.
 
 # Dependencies
 
