@@ -10,6 +10,7 @@ A Discord bot for managing nominations and voting for a member of the week. The 
 
 # Things worth noting
 
+- Everything can be done manually. If you would prefer this, simply delete the code after `#Schedule Jobs` but ensure that `bot.run(TOKEN)` remains.
 - The bot must be able to send messages and add reactions in the channel specified in `.env`, it will not run if there is no channel ID.
 - `/list_nominations` and `/nominate` are the only commands that do not require the `ADMINISTRATOR` permission and can be used by everyone.
 - You cannot run two polls at once.
