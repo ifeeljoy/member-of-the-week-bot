@@ -47,7 +47,8 @@ Rename `.env-example` to .env and add your bot token and channel ID.
 ```
 # Your bot's token.
 DISCORD_TOKEN=here
-# The channel creating the poll and announcing the winner.
+
+# The channel for creating the poll and announcing the winner.
 DISCORD_CHANNEL_ID=here
 ```
 
