@@ -6,73 +6,87 @@ from dotenv import load_dotenv
 import sqlite3
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 CHANNEL_ID = int(os.getenv('DISCORD_CHANNEL_ID'))
+USER_ID = int(os.getenv('DISCORD_USER_ID')) 
 
-# Set up the bot
 intents = discord.Intents.default()
-bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Connect to SQLite database
+class MemberOfTheWeekBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.scheduler = AsyncIOScheduler()
+
+    async def setup_hook(self) -> None:
+        self.scheduler.add_job(create_poll, 'cron', day_of_week='fri', hour=12)  # Schedule poll creation every Friday at 12 PM UTC
+        self.scheduler.add_job(collect_votes, 'cron', day_of_week='sun', hour=18)  # Schedule vote collection every Sunday at 6 PM UTC
+        self.scheduler.start()
+
+bot = MemberOfTheWeekBot(command_prefix='!', intents=intents)
+
 conn = sqlite3.connect('nominations.db')
 cursor = conn.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS nominations (
     id INTEGER PRIMARY KEY,
-    nominee TEXT NOT NULL,
-    nominator TEXT NOT NULL,
+    nominee_id BIGINT NOT NULL,
+    nominator_id BIGINT NOT NULL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 ''')
 conn.commit()
 
-# Scheduler
-scheduler = AsyncIOScheduler()
-
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
-    try:
-        synced = await bot.tree.sync()
-        print(f'Synced {len(synced)} commands')
-    except Exception as e:
-        print(f'Error syncing commands: {e}')
-    scheduler.start()
 
-@bot.tree.command(name="nominate", description="Nominate a user for Member of the Week")
+@bot.command()
+async def sync(ctx):
+    if ctx.author.id == USER_ID:
+        try:
+            synced = await bot.tree.sync()
+            await ctx.send(f'Synced {len(synced)} commands')
+        except Exception as e:
+            await ctx.send(f'Error syncing commands: {e}')
+    else:
+        await ctx.send("You do not have permission to use this command.")
+
+@bot.tree.command(description="Nominate a user for Member of the Week")
 async def nominate(interaction: discord.Interaction, user: discord.User):
-    # Check if the user is trying to nominate themselves
+    
     if user.id == interaction.user.id:
         await interaction.response.send_message("You cannot nominate yourself.")
         return
 
-    # Check if the user has already nominated someone
-    cursor.execute("SELECT COUNT(*) FROM nominations WHERE nominator = ?", (interaction.user.name,))
+    cursor.execute("SELECT COUNT(*) FROM nominations WHERE nominator_id = ?", (interaction.user.id,))
     count = cursor.fetchone()[0]
     if count > 0:
         await interaction.response.send_message("You have already nominated someone.")
         return
 
-    cursor.execute("INSERT INTO nominations (nominee, nominator) VALUES (?, ?)", (user.name, interaction.user.name))
+    cursor.execute("INSERT INTO nominations (nominee_id, nominator_id) VALUES (?, ?)", (user.id, interaction.user.id))
     conn.commit()
-    await interaction.response.send_message(f"Successfully nominated {user.name} for Member of the Week!")
+    await interaction.response.send_message(f"Successfully nominated {user.mention} for Member of the Week!")
 
-@bot.tree.command(name="list_nominations", description="List all nominations for Member of the Week")
+@bot.tree.command(description="List all nominations for Member of the Week")
 async def list_nominations(interaction: discord.Interaction):
-    cursor.execute("SELECT nominee, nominator, timestamp FROM nominations")
+    cursor.execute("SELECT nominee_id, nominator_id, timestamp FROM nominations")
     nominations = cursor.fetchall()
     if not nominations:
         await interaction.response.send_message("No nominations found.")
         return
-    response = "Current Nominations:\n"
-    for nominee, nominator, timestamp in nominations:
-        response += f"- {nominee} nominated by {nominator} at {timestamp}\n"
-    await interaction.response.send_message(response)
 
-@bot.tree.command(name="clear_nominations", description="Clear all nominations (Admin only)")
-@commands.has_permissions(administrator=True)
+    embed = discord.Embed(title="Current Nominations", color=discord.Color.blue())
+    for nominee_id, nominator_id, timestamp in nominations:
+        nominee = await bot.fetch_user(nominee_id)
+        nominator = await bot.fetch_user(nominator_id)
+        embed.add_field(name=f"{nominee.mention}", value=f"Nominated by {nominator.mention} at {timestamp}", inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+@app_commands.default_permissions(administrator=True)
+@bot.tree.command(description="Clear all nominations (Admin only)")
 async def clear_nominations(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have the necessary permissions to use this command.")
@@ -86,10 +100,19 @@ async def clear_nominations(interaction: discord.Interaction):
     conn.commit()
     await interaction.response.send_message("All nominations have been cleared.")
 
-# Create Poll
+@bot.event
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("You do not have the necessary permissions to use this command.")
+    elif isinstance(error, app_commands.CommandInvokeError) and "no nominations found" in str(error).lower():
+        await interaction.response.send_message("No nominations found.")
+    else:
+        await interaction.response.send_message("An error occurred.")
+
+# Create poll
 async def create_poll():
     channel = bot.get_channel(CHANNEL_ID)
-    cursor.execute("SELECT nominee, COUNT(nominee) as count FROM nominations GROUP BY nominee ORDER BY count DESC LIMIT 10")
+    cursor.execute("SELECT nominee_id, COUNT(nominee_id) as count FROM nominations GROUP BY nominee_id ORDER BY count DESC LIMIT 10")
     nominees = cursor.fetchall()
     if not nominees:
         await channel.send("No nominations found.")
@@ -97,25 +120,29 @@ async def create_poll():
 
     poll_message = "Vote for Member of the Week:\n"
     emoji_numbers = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']  # Up to 10 emojis
-    for index, (nominee, count) in enumerate(nominees, start=1):
-        poll_message += f"{emoji_numbers[index-1]} {nominee} ({count} nominations)\n"
+    for index, (nominee_id, count) in enumerate(nominees, start=1):
+        nominee = await bot.fetch_user(nominee_id)
+        poll_message += f"{emoji_numbers[index-1]} {nominee.mention} ({count} nominations)\n"
     poll_msg = await channel.send(poll_message)
     
-    # Add reactions for voting
     for emoji in emoji_numbers[:len(nominees)]:
         await poll_msg.add_reaction(emoji)
 
-# Collect Votes and Announce Winner
 async def collect_votes():
     channel = bot.get_channel(CHANNEL_ID)
-    async for message in channel.history(limit=1):
-        if message.author != bot.user or "Vote for Member of the Week" not in message.content:
-            await channel.send("No poll found.")
-            return
-        poll_msg = message
+    poll_msg = None
+    async for message in channel.history(limit=100):
+        if message.author == bot.user and "Vote for Member of the Week" in message.content:
+            time_diff = discord.utils.utcnow() - message.created_at
+            if time_diff.total_seconds() < 259200:  # 3 days
+                poll_msg = message
+                break
+    if not poll_msg:
+        await channel.send("No poll found.")
+        return
 
     reactions = poll_msg.reactions
-    counts = [reaction.count - 1 for reaction in reactions if reaction.emoji in ('1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟')]  # Subtract 1 to exclude the bot's own reaction
+    counts = [reaction.count - 1 for reaction in reactions if reaction.emoji in ('1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟')]  # Subtract bot's own reaction
     if not counts:
         await channel.send("No votes found.")
         return
@@ -123,66 +150,63 @@ async def collect_votes():
     max_votes = max(counts)
     winners = [i for i, count in enumerate(counts) if count == max_votes]
 
-    cursor.execute("SELECT nominee FROM nominations GROUP BY nominee ORDER BY COUNT(nominee) DESC LIMIT 10")
+    cursor.execute("SELECT nominee_id FROM nominations GROUP BY nominee_id ORDER BY COUNT(nominee_id) DESC LIMIT 10")
     nominees = cursor.fetchall()
 
     if len(winners) > 1:
         tie_message = "There's a tie! The nominees with the highest votes are:\n"
-        tie_message += "\n".join([f"{nominees[i][0]}" for i in winners])
+        tie_message += "\n".join([f"{(await bot.fetch_user(nominees[i][0])).mention}" for i in winners])
         await channel.send(tie_message)
     else:
         winner_index = winners[0]
-        winner = nominees[winner_index][0]
-        await channel.send(f"The Member of the Week is: {winner}!")
+        winner = await bot.fetch_user(nominees[winner_index][0])
+        await channel.send(f"The Member of the Week is: {winner.mention}!")
 
     # Clear nominations after announcing the winner or tie
     cursor.execute("DELETE FROM nominations")
     conn.commit()
 
 # Manually run poll command
-@bot.tree.command(name="runpoll", description="Manually run a poll for Member of the Week")
-@commands.has_permissions(administrator=True)
+@app_commands.default_permissions(administrator=True)
+@bot.tree.command(description="Manually run a poll for Member of the Week")
 async def runpoll(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have the necessary permissions to use this command.")
         return
 
-    # Check for existing nominations
     cursor.execute("SELECT COUNT(*) FROM nominations")
     count = cursor.fetchone()[0]
     if count == 0:
         await interaction.response.send_message("No nominations found to create a poll.")
         return
 
-    # Check if there is already a poll running
+    # Check if there is already a poll running in the last 3 days
     channel = bot.get_channel(CHANNEL_ID)
-    async for message in channel.history(limit=1):
+    async for message in channel.history(limit=100):
         if message.author == bot.user and "Vote for Member of the Week" in message.content:
-            await interaction.response.send_message("A poll is already running.")
-            return
+            time_diff = discord.utils.utcnow() - message.created_at
+            if time_diff.total_seconds() < 259200:  # 3 days
+                await interaction.response.send_message("A poll is already running.")
+                return
 
     await create_poll()
     await interaction.response.send_message("Poll has been created successfully.")
 
 # Manually end poll command
-@bot.tree.command(name="endpoll", description="Manually end the poll and announce the winner")
-@commands.has_permissions(administrator=True)
+@app_commands.default_permissions(administrator=True)
+@bot.tree.command(description="Manually end the poll and announce the winner")
 async def endpoll(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("You do not have the necessary permissions to use this command.")
         return
 
     channel = bot.get_channel(CHANNEL_ID)
-    async for message in channel.history(limit=1):
-        if message.author != bot.user or "Vote for Member of the Week" not in message.content:
-            await interaction.response.send_message("No poll found to end.")
+    async for message in channel.history(limit=100):
+        if message.author == bot.user and "Vote for Member of the Week" in message.content:
+            await collect_votes()
+            await interaction.response.send_message("Poll has been ended and the winner has been announced.")
             return
 
-    await collect_votes()
-    await interaction.response.send_message("Poll has been ended and the winner has been announced.")
-
-# Schedule Jobs
-scheduler.add_job(create_poll, 'cron', day_of_week='fri', hour=12)  # Schedule poll creation every Friday at 12 PM
-scheduler.add_job(collect_votes, 'cron', day_of_week='mon', hour=12)  # Schedule vote collection every Monday at 12 PM
+    await interaction.response.send_message("No poll found to end.")
 
 bot.run(TOKEN)
