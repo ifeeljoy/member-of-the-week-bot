@@ -27,7 +27,7 @@ Make sure you have Python 3.12+
 Clone the repository.
 
 ```
-git clone https://github.com/ifeeljoy/member-of-the-week-bot
+git clone https://github.com/ifeeljoy/member-of-the-week.git
 ```
 
 Install dependencies. 
