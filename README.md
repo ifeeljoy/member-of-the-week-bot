@@ -15,9 +15,13 @@ That's all. All you have to do is create the channel, specify the channel ID in 
 # Commands
 
 `/nominate user:` - Nominate a user for Member of the Week.
+
 `/list_nominations` - List all nominations for Member of the Week.
+
 `/clear_nominations` - Clear all nominations. (Admin only)
+
 `/runpoll` - Manually run a poll for Member of the Week. (Admin only)
+
 `/endpoll` - Manually end the poll and announce the winner. (Admin only)
 
 # Dependencies
