@@ -19,7 +19,7 @@ class MemberOfTheWeekBot(commands.Bot):
         self.scheduler = AsyncIOScheduler()
 
     async def setup_hook(self) -> None:
-        self.scheduler.add_job(create_poll, 'cron', day_of_week='fri', hour=12)  # Schedule poll creation every Friday at 12 AM UTC
+        self.scheduler.add_job(create_poll, 'cron', day_of_week='fri', hour=0)  # Schedule poll creation every Friday at 12 AM UTC
         self.scheduler.add_job(collect_votes, 'cron', day_of_week='sun', hour=12)  # Schedule vote collection every Sunday at 12 PM UTC
         self.scheduler.start()
 
